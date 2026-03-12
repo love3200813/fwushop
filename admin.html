@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>飯丸屋 - 專屬後台</title>
+    <style>
+        :root { --primary: #f39c12; --bg: #1a1a1a; --card: #2d2d2d; }
+        body { font-family: sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 10px; }
+        .page { display: none; max-width: 600px; margin: auto; }
+        .active { display: block; }
+        .btn-main { width: 100%; padding: 15px; background: var(--primary); color: #fff; border: none; border-radius: 8px; font-weight: bold; margin-top: 10px; font-size: 18px; cursor: pointer; }
+        .order-card { background: #333; margin: 15px 0; padding: 15px; border-radius: 12px; border-left: 5px solid var(--primary); }
+        .order-card.pending-pay { opacity: 0.5; border-left: 5px solid #7f8c8d; } /* 待付款單變灰色 */
+        input { width: 100%; padding: 15px; margin: 10px 0; border-radius: 8px; border: none; font-size: 16px; box-sizing: border-box; }
+        .hardware-panel { background: #2c3e50; padding: 15px; border-radius: 10px; margin-bottom: 15px; border: 1px solid #34495e; }
+    </style>
+</head>
+<body>
+
+<div id="loginPage" class="page active" style="text-align:center; padding-top:50px;">
+    <h2>🔐 店家專屬後台</h2>
+    <input type="password" id="pwInput" placeholder="請輸入櫃檯密碼">
+    <button class="btn-main" onclick="login()">登入系統</button>
+</div>
+
+<div id="adminPage" class="page">
+    <div class="hardware-panel">
+        <div style="font-weight:bold; margin-bottom:10px; color:var(--primary);">⚙️ 出單機設定 (純淨圖形引擎版)</div>
+        <button id="btBtn" class="btn-main" style="background:#e67e22; margin-top:0; font-size:16px; padding:12px;">🔌 建立 USB 連線</button>
+        <div id="printerStatus" style="font-size:14px; font-weight:bold; color:#e74c3c; margin-top:10px; text-align:center;">🔴 尚未連線</div>
+    </div>
+
+    <div style="display:flex; gap:5px; align-items:center;">
+        <button class="btn-main" style="background:#3498db; flex:1; font-size:14px;" onclick="loadOrders()">🔄 手動刷新</button>
+        <button class="btn-main" style="background:#9b59b6; flex:1; font-size:14px;" onclick="doShiftCheckout()">📊 交班結算</button>
+    </div>
+    <div style="text-align:center; font-size:12px; color:#aaa; margin-top:10px;">🟢 系統已開啟每 5 秒自動更新</div>
+    <div id="orderList" style="margin-top:10px"></div>
+</div>
+
+<script>
+    const GAS_API_URL = "https://script.google.com/macros/s/AKfycbz0HQ7EsRj1kFhP-UT9DIn90WgXt7q-H8vkEh3fD79_4BuCm5HnCFGF9q3h1mf6pY4s/exec"; 
+
+    let adminAutoRefreshTimer = null; let usbPrinterDevice = null; let usbEndpointOut = null;
+
+    function formatPickupTime(val) {
+        if (typeof val === 'string' && val.includes('1899')) {
+            const d = new Date(val);
+            if (!isNaN(d)) {
+                const today = new Date();
+                const yyyy = today.getFullYear(), mm = String(today.getMonth() + 1).padStart(2, '0'), dd = String(today.getDate()).padStart(2, '0');
+                const hh = String(d.getHours()).padStart(2, '0'), min = String(d.getMinutes()).padStart(2, '0');
+                return `${yyyy}/${mm}/${dd} ${hh}:${min}`; 
+            }
+        }
+        return val;
+    }
+
+    async function apiCall(action, params = {}) {
+        let url = new URL(GAS_API_URL);
+        url.searchParams.append('action', action);
+        for (let key in params) url.searchParams.append(key, typeof params[key] === 'object' ? JSON.stringify(params[key]) : params[key]);
+        try { const response = await fetch(url); return await response.json(); } catch (e) { return null; }
+    }
+
+    function showPage(id) {
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+        if(id === 'adminPage') { loadOrders(); adminAutoRefreshTimer = setInterval(loadOrders, 5000); }
+    }
+
+    async function login() { const res = await apiCall("login", { pw: document.getElementById('pwInput').value }); if(res) showPage('adminPage'); else alert('密碼錯誤'); }
+
+    async function loadOrders() {
+        const listDiv = document.getElementById('orderList');
+        if(listDiv.innerHTML === "") listDiv.innerHTML = "⏳ 讀取中...";
+        const orders = await apiCall("getOrders");
+        if (!orders) return;
+        
+        listDiv.innerHTML = orders.map(o => {
+            const pk = formatPickupTime(o.pickup);
+            const isPending = o.status === "待付款";
+            const cardClass = isPending ? "order-card pending-pay" : "order-card"; // 待付款反灰
+            
+            let actionBtns = '';
+            if (isPending) {
+                // 待付款只給作廢按鈕
+                actionBtns = `<button class="btn-main" style="background:#e74c3c; color:#fff; margin:0;" onclick="upSt(${o.row},'已作廢');">🗑️ 逾時作廢</button>`;
+            } else if (o.status === "待收款") {
+                actionBtns = `<button class="btn-main" style="background:#f1c40f; color:#000; margin:0;" onclick="upSt(${o.row},'待製作');alert('收款成功！');">💰 確認收款</button>`;
+            } else {
+                actionBtns = `
+                    <button class="btn-main" style="background:#e67e22; flex:1; margin:0;" onclick="doPrint('${o.seq}','${o.content}',${o.total},'${pk}',${o.row})">🖨️ 列印</button>
+                    <button class="btn-main" style="background:#2ecc71; flex:1; margin:0;" onclick="upSt(${o.row},null,'請取餐')">🔔 通知</button>
+                    <button class="btn-main" style="background:#666; flex:1; margin:0;" onclick="upSt(${o.row},'已完成')">✅ 完成</button>
+                    <button class="btn-main" style="background:#e74c3c; flex:0.5; margin:0;" onclick="if(confirm('確定要作廢此單嗎？')) upSt(${o.row},'已作廢')">🗑️</button>
+                `;
+            }
+            return `<div class="${cardClass}"><div style="display:flex; justify-content:space-between;"><b>${o.seq}</b><span style="background:#e74c3c; padding:2px 8px; border-radius:4px;">${pk}</span></div><small>[${o.status}]</small><br>${o.content}<br>$${o.total} (${o.pay})<div style="display:flex; gap:10px; margin-top:10px;">${actionBtns}</div></div>`;
+        }).join('') || "目前無待處理訂單";
+    }
+
+    async function doShiftCheckout() { if(confirm("確定進行交班結算嗎？(不會計算待付款與作廢的單)")) { const res = await apiCall("getShiftReport"); alert(res); } }
+    async function upSt(r, s, n) { await apiCall("updateStatus", { row: r, status: s||"null", notify: n||"null" }); loadOrders(); }
+
+    // --- USB 圖形列印引擎 ---
+    document.getElementById('btBtn').addEventListener('click', async () => {
+        const statusDiv = document.getElementById('printerStatus');
+        try {
+            usbPrinterDevice = await navigator.usb.requestDevice({ filters: [{ classCode: 0 }, { classCode: 7 }, { classCode: 255 }] });
+            await usbPrinterDevice.open();
+            if (usbPrinterDevice.configuration === null) await usbPrinterDevice.selectConfiguration(1);
+            let interfaceNumber = null;
+            for (let config of usbPrinterDevice.configurations) {
+                for (let intf of config.interfaces) {
+                    for (let alt of intf.alternates) {
+                        if (alt.interfaceClass === 7 || alt.interfaceClass === 255) { 
+                            interfaceNumber = intf.interfaceNumber;
+                            for (let ep of alt.endpoints) { if (ep.direction === 'out') usbEndpointOut = ep.endpointNumber; }
+                        }
+                    }
+                }
+            }
+            if (usbEndpointOut === null) {
+                for (let intf of usbPrinterDevice.configuration.interfaces) {
+                    interfaceNumber = intf.interfaceNumber;
+                    for (let ep of intf.alternates[0].endpoints) { if (ep.direction === 'out') { usbEndpointOut = ep.endpointNumber; break; } }
+                    if(usbEndpointOut !== null) break;
+                }
+            }
+            if (usbEndpointOut !== null) {
+                await usbPrinterDevice.claimInterface(interfaceNumber);
+                statusDiv.innerHTML = `🟢 已連線 (USB - 圖形引擎)`; statusDiv.style.color = '#2ecc71';
+            } else { throw new Error("無法取得 USB 印表機權限"); }
+        } catch(e) { statusDiv.innerHTML = `🔴 連線失敗`; statusDiv.style.color = '#e74c3c'; alert("連線失敗: " + e.message); }
+    });
+
+    async function doPrint(seq, cnt, ttl, pk, row) {
+        if (!usbPrinterDevice || !usbEndpointOut) return alert("請先點擊建立 USB 連線");
+        try {
+            const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
+            const items = cnt.split(','); const itemHeight = 55; 
+            canvas.width = 384; canvas.height = 300 + (items.length * itemHeight) + 80; 
+
+            ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#000000'; ctx.textBaseline = 'top';
+
+            let drawY = 10;
+            ctx.font = 'bold 50px "Microsoft JhengHei", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('飯丸屋', canvas.width / 2, drawY); drawY += 75;
+            ctx.font = 'bold 30px "Microsoft JhengHei", sans-serif'; ctx.textAlign = 'left';
+            ctx.fillText(`序號: ${seq}`, 10, drawY); drawY += 45; ctx.fillText(`取餐: ${pk}`, 10, drawY); drawY += 45;
+            ctx.font = 'bold 24px monospace'; ctx.fillText(`----------------------------`, 10, drawY); drawY += 35;
+            ctx.font = 'bold 36px "Microsoft JhengHei", sans-serif';
+            for(let i = 0; i < items.length; i++) { ctx.fillText(items[i].trim(), 10, drawY); drawY += itemHeight; }
+            ctx.font = 'bold 24px monospace'; ctx.fillText(`----------------------------`, 10, drawY); drawY += 35;
+            ctx.font = 'bold 42px "Microsoft JhengHei", sans-serif'; ctx.textAlign = 'right'; ctx.fillText(`總計: $${ttl}`, canvas.width - 10, drawY);
+
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+            const widthBytes = Math.ceil(canvas.width / 8); 
+            const bitmapData = new Uint8Array(widthBytes * canvas.height);
+            bitmapData.fill(255);
+
+            for (let py = 0; py < canvas.height; py++) {
+                for (let px = 0; px < canvas.width; px++) {
+                    const idx = (py * canvas.width + px) * 4;
+                    const r = imgData[idx], g = imgData[idx+1], b = imgData[idx+2], a = imgData[idx+3];
+                    if (a > 128 && (r+g+b)/3 < 128) {
+                        bitmapData[py * widthBytes + Math.floor(px / 8)] &= ~(1 << (7 - (px % 8)));
+                    }
+                }
+            }
+
+            const header = new TextEncoder().encode(`SIZE 48 mm, ${Math.ceil(canvas.height / 8)} mm\r\nGAP 0 mm, 0 mm\r\nCLS\r\nBITMAP 0,0,${widthBytes},${canvas.height},0,`);
+            const footer = new TextEncoder().encode(`\r\nPRINT 1,1\r\nFEED 160\r\n`);
+            const finalBuffer = new Uint8Array(header.length + bitmapData.length + footer.length);
+            finalBuffer.set(header, 0); finalBuffer.set(bitmapData, header.length); finalBuffer.set(footer, header.length + bitmapData.length);
+
+            await usbPrinterDevice.transferOut(usbEndpointOut, finalBuffer); 
+            upSt(row, '待製作');
+        } catch (e) { alert("列印失敗：" + e.message); }
+    }
+</script>
+</body>
+</html>
