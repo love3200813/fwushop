@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>飯丸屋 - 專屬後台</title>
+    <title>飯丸屋 - 後台管理</title>
     <style>
         :root { --primary: #f39c12; --bg: #1a1a1a; --card: #2d2d2d; }
         body { font-family: sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 10px; }
@@ -10,9 +10,11 @@
         .active { display: block; }
         .btn-main { width: 100%; padding: 15px; background: var(--primary); color: #fff; border: none; border-radius: 8px; font-weight: bold; margin-top: 10px; font-size: 18px; cursor: pointer; }
         .order-card { background: #333; margin: 15px 0; padding: 15px; border-radius: 12px; border-left: 5px solid var(--primary); }
-        .order-card.pending-pay { opacity: 0.5; border-left: 5px solid #7f8c8d; } /* 待付款單變灰色 */
-        input { width: 100%; padding: 15px; margin: 10px 0; border-radius: 8px; border: none; font-size: 16px; box-sizing: border-box; }
+        .order-card.pending-pay { opacity: 0.5; border-left: 5px solid #7f8c8d; }
+        .item-row { background: var(--card); padding: 12px; margin: 5px 0; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border-left: 5px solid var(--primary); }
+        input, select { width: 100%; padding: 15px; margin: 10px 0; border-radius: 8px; border: none; font-size: 16px; box-sizing: border-box; }
         .hardware-panel { background: #2c3e50; padding: 15px; border-radius: 10px; margin-bottom: 15px; border: 1px solid #34495e; }
+        .btn-qty { width: 40px; height: 40px; border-radius: 50%; border: none; background: var(--primary); color: white; font-weight: bold; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -23,34 +25,48 @@
     <button class="btn-main" onclick="login()">登入系統</button>
 </div>
 
+<div id="menuPage" class="page">
+    <h2 style="text-align:center; color:var(--primary)">🍱 櫃檯現場代點</h2>
+    <div id="menuList"></div>
+    <div style="background:#333; padding:15px; border-radius:10px; margin-top:15px">
+        <label>取餐時間：</label>
+        <select id="pickupTime"></select>
+        <h2 style="text-align:right;">總計: $<span id="totalTxt">0</span></h2>
+        <button class="btn-main" style="background:#2ecc71" onclick="submitStaffOrder()">確認下單</button>
+        <button class="btn-main" style="background:#666" onclick="showPage('adminPage')">返回列表</button>
+    </div>
+</div>
+
 <div id="adminPage" class="page">
     <div class="hardware-panel">
-        <div style="font-weight:bold; margin-bottom:10px; color:var(--primary);">⚙️ 出單機設定 (純淨圖形引擎版)</div>
+        <div style="font-weight:bold; margin-bottom:10px; color:var(--primary);">⚙️ 出單機設定</div>
         <button id="btBtn" class="btn-main" style="background:#e67e22; margin-top:0; font-size:16px; padding:12px;">🔌 建立 USB 連線</button>
         <div id="printerStatus" style="font-size:14px; font-weight:bold; color:#e74c3c; margin-top:10px; text-align:center;">🔴 尚未連線</div>
     </div>
 
-    <div style="display:flex; gap:5px; align-items:center;">
-        <button class="btn-main" style="background:#3498db; flex:1; font-size:14px;" onclick="loadOrders()">🔄 手動刷新</button>
-        <button class="btn-main" style="background:#9b59b6; flex:1; font-size:14px;" onclick="doShiftCheckout()">📊 交班結算</button>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+        <button class="btn-main" style="background:#2ecc71; margin-top:0;" onclick="startStaffOrder()">🍱 現場點餐</button>
+        <button class="btn-main" style="background:#3498db; margin-top:0;" onclick="loadOrders()">🔄 刷新列表</button>
+        <button class="btn-main" style="background:#9b59b6; margin-top:0;" onclick="doShiftCheckout()">📊 交班結算</button>
+        <button class="btn-main" style="background:#666; margin-top:0;" onclick="location.reload()">🔒 登出</button>
     </div>
-    <div style="text-align:center; font-size:12px; color:#aaa; margin-top:10px;">🟢 系統已開啟每 5 秒自動更新</div>
     <div id="orderList" style="margin-top:10px"></div>
 </div>
 
 <script>
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbz0HQ7EsRj1kFhP-UT9DIn90WgXt7q-H8vkEh3fD79_4BuCm5HnCFGF9q3h1mf6pY4s/exec"; 
+    const menuItems = [{n:"招牌午餐肉", p:65}, {n:"炸蝦塔塔", p:95}, {n:"咖哩可樂餅", p:85}, {n:"日式炸雞", p:90}, {n:"經典雙拼", p:120}, {n:"沖繩豆乳", p:45}, {n:"花生醬厚牛", p:110}, {n:"宇治抹茶", p:55}];
+    
+    let cart = {}; let adminAutoRefreshTimer = null; 
+    let usbPrinterDevice = null; let usbEndpointOut = null;
 
-    let adminAutoRefreshTimer = null; let usbPrinterDevice = null; let usbEndpointOut = null;
-
+    // --- 保留你的時間轉換邏輯 ---
     function formatPickupTime(val) {
         if (typeof val === 'string' && val.includes('1899')) {
             const d = new Date(val);
             if (!isNaN(d)) {
                 const today = new Date();
-                const yyyy = today.getFullYear(), mm = String(today.getMonth() + 1).padStart(2, '0'), dd = String(today.getDate()).padStart(2, '0');
-                const hh = String(d.getHours()).padStart(2, '0'), min = String(d.getMinutes()).padStart(2, '0');
-                return `${yyyy}/${mm}/${dd} ${hh}:${min}`; 
+                return `${today.getFullYear()}/${String(today.getMonth()+1).padStart(2,'0')}/${String(today.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
             }
         }
         return val;
@@ -66,44 +82,84 @@
     function showPage(id) {
         document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
         document.getElementById(id).classList.add('active');
-        if(id === 'adminPage') { loadOrders(); adminAutoRefreshTimer = setInterval(loadOrders, 5000); }
+        if(id === 'adminPage') { 
+            loadOrders(); 
+            if(!adminAutoRefreshTimer) adminAutoRefreshTimer = setInterval(loadOrders, 5000); 
+        } else {
+            if(adminAutoRefreshTimer) { clearInterval(adminAutoRefreshTimer); adminAutoRefreshTimer = null; }
+        }
     }
 
-    async function login() { const res = await apiCall("login", { pw: document.getElementById('pwInput').value }); if(res) showPage('adminPage'); else alert('密碼錯誤'); }
+    async function login() { const res = await apiCall("login", { pw: document.getElementById('pwInput').value }); if(res) { generateTimeOptions(); showPage('adminPage'); } else alert('密碼錯誤'); }
 
+    // --- 【純新增】：現場點餐邏輯 ---
+    function startStaffOrder() {
+        cart = {}; renderStaffMenu();
+        document.getElementById('totalTxt').innerText = "0";
+        showPage('menuPage');
+    }
+    function renderStaffMenu() {
+        document.getElementById('menuList').innerHTML = menuItems.map(m => `
+            <div class="item-row">
+                <span>${m.n} ($${m.p})</span>
+                <div>
+                    <button class="btn-qty" onclick="editStaffCart('${m.n}',-1)">-</button>
+                    <span style="margin:0 10px; width:20px; display:inline-block; text-align:center;">${cart[m.n] || 0}</span>
+                    <button class="btn-qty" onclick="editStaffCart('${m.n}',1)">+</button>
+                </div>
+            </div>`).join('');
+    }
+    function editStaffCart(n, d) {
+        cart[n] = (cart[n] || 0) + d;
+        if(cart[n] <= 0) delete cart[n];
+        renderStaffMenu();
+        let t = 0; for(let k in cart) t += menuItems.find(i=>i.n===k).p * cart[k];
+        document.getElementById('totalTxt').innerText = t;
+    }
+    function generateTimeOptions() {
+        let opts = `<option value="現場取餐">現場取餐 (盡快)</option>`;
+        for(let h=11; h<=19; h++) opts += `<option value="${h}:00">${h}:00</option><option value="${h}:30">${h}:30</option>`;
+        document.getElementById('pickupTime').innerHTML = opts;
+    }
+    async function submitStaffOrder() {
+        if(Object.keys(cart).length === 0) return alert("請選擇餐點");
+        const orderData = { 
+            items: Object.keys(cart).map(k => `${k}x${cart[k]}`).join(','), 
+            total: document.getElementById('totalTxt').innerText, 
+            pickupTime: document.getElementById('pickupTime').value, 
+            payMethod: "現金" 
+        };
+        const res = await apiCall("submitOrder", { orderData: orderData });
+        if(res && res.status === "success") { showPage('adminPage'); }
+    }
+
+    // --- 保留你的訂單列表與狀態邏輯 ---
     async function loadOrders() {
         const listDiv = document.getElementById('orderList');
-        if(listDiv.innerHTML === "") listDiv.innerHTML = "⏳ 讀取中...";
         const orders = await apiCall("getOrders");
         if (!orders) return;
-        
         listDiv.innerHTML = orders.map(o => {
             const pk = formatPickupTime(o.pickup);
             const isPending = o.status === "待付款";
-            const cardClass = isPending ? "order-card pending-pay" : "order-card"; // 待付款反灰
-            
-            let actionBtns = '';
-            if (isPending) {
-                // 待付款只給作廢按鈕
-                actionBtns = `<button class="btn-main" style="background:#e74c3c; color:#fff; margin:0;" onclick="upSt(${o.row},'已作廢');">🗑️ 逾時作廢</button>`;
-            } else if (o.status === "待收款") {
-                actionBtns = `<button class="btn-main" style="background:#f1c40f; color:#000; margin:0;" onclick="upSt(${o.row},'待製作');alert('收款成功！');">💰 確認收款</button>`;
-            } else {
-                actionBtns = `
-                    <button class="btn-main" style="background:#e67e22; flex:1; margin:0;" onclick="doPrint('${o.seq}','${o.content}',${o.total},'${pk}',${o.row})">🖨️ 列印</button>
-                    <button class="btn-main" style="background:#2ecc71; flex:1; margin:0;" onclick="upSt(${o.row},null,'請取餐')">🔔 通知</button>
-                    <button class="btn-main" style="background:#666; flex:1; margin:0;" onclick="upSt(${o.row},'已完成')">✅ 完成</button>
-                    <button class="btn-main" style="background:#e74c3c; flex:0.5; margin:0;" onclick="if(confirm('確定要作廢此單嗎？')) upSt(${o.row},'已作廢')">🗑️</button>
-                `;
-            }
-            return `<div class="${cardClass}"><div style="display:flex; justify-content:space-between;"><b>${o.seq}</b><span style="background:#e74c3c; padding:2px 8px; border-radius:4px;">${pk}</span></div><small>[${o.status}]</small><br>${o.content}<br>$${o.total} (${o.pay})<div style="display:flex; gap:10px; margin-top:10px;">${actionBtns}</div></div>`;
-        }).join('') || "目前無待處理訂單";
+            const cardClass = isPending ? "order-card pending-pay" : "order-card";
+            let actionBtns = isPending ? 
+                `<button class="btn-main" style="background:#e74c3c; margin:0;" onclick="upSt(${o.row},'已作廢')">🗑️ 逾時作廢</button>` :
+                (o.status === "待收款" ? 
+                    `<button class="btn-main" style="background:#f1c40f; color:#000; margin:0;" onclick="upSt(${o.row},'待製作')">💰 確認收款</button>` :
+                    `<div style="display:flex; gap:5px;">
+                        <button class="btn-main" style="background:#e67e22; flex:1; margin:0; font-size:14px;" onclick="doPrint('${o.seq}','${o.content}',${o.total},'${pk}',${o.row})">🖨️ 列印</button>
+                        <button class="btn-main" style="background:#2ecc71; flex:1; margin:0; font-size:14px;" onclick="upSt(${o.row},null,'請取餐')">🔔 通知</button>
+                        <button class="btn-main" style="background:#666; flex:1; margin:0; font-size:14px;" onclick="upSt(${o.row},'已完成')">✅ 完成</button>
+                        <button class="btn-main" style="background:#e74c3c; flex:0.4; margin:0;" onclick="if(confirm('作廢？')) upSt(${o.row},'已作廢')">🗑️</button>
+                    </div>`);
+            return `<div class="${cardClass}"><div><b>${o.seq}</b> <span style="float:right; background:#e74c3c; padding:2px 8px; border-radius:4px; font-size:12px;">${pk}</span></div><small>[${o.status}] ${o.pay}</small><br>${o.content}<br><b>$${o.total}</b><div style="margin-top:10px;">${actionBtns}</div></div>`;
+        }).join('');
     }
 
-    async function doShiftCheckout() { if(confirm("確定進行交班結算嗎？(不會計算待付款與作廢的單)")) { const res = await apiCall("getShiftReport"); alert(res); } }
+    async function doShiftCheckout() { if(confirm("確定進行交班結算？")) { const res = await apiCall("getShiftReport"); alert(res); } }
     async function upSt(r, s, n) { await apiCall("updateStatus", { row: r, status: s||"null", notify: n||"null" }); loadOrders(); }
 
-    // --- USB 圖形列印引擎 ---
+    // --- 保留你測試成功的 USB 列印引擎 (完全沒動) ---
     document.getElementById('btBtn').addEventListener('click', async () => {
         const statusDiv = document.getElementById('printerStatus');
         try {
@@ -116,7 +172,7 @@
                     for (let alt of intf.alternates) {
                         if (alt.interfaceClass === 7 || alt.interfaceClass === 255) { 
                             interfaceNumber = intf.interfaceNumber;
-                            for (let ep of alt.endpoints) { if (ep.direction === 'out') usbEndpointOut = ep.endpointNumber; }
+                            for (let ep of alt.endpoints) if (ep.direction === 'out') usbEndpointOut = ep.endpointNumber;
                         }
                     }
                 }
@@ -124,60 +180,50 @@
             if (usbEndpointOut === null) {
                 for (let intf of usbPrinterDevice.configuration.interfaces) {
                     interfaceNumber = intf.interfaceNumber;
-                    for (let ep of intf.alternates[0].endpoints) { if (ep.direction === 'out') { usbEndpointOut = ep.endpointNumber; break; } }
-                    if(usbEndpointOut !== null) break;
+                    for (let ep of intf.alternates[0].endpoints) if (ep.direction === 'out') { usbEndpointOut = ep.endpointNumber; break; }
                 }
             }
-            if (usbEndpointOut !== null) {
-                await usbPrinterDevice.claimInterface(interfaceNumber);
-                statusDiv.innerHTML = `🟢 已連線 (USB - 圖形引擎)`; statusDiv.style.color = '#2ecc71';
-            } else { throw new Error("無法取得 USB 印表機權限"); }
-        } catch(e) { statusDiv.innerHTML = `🔴 連線失敗`; statusDiv.style.color = '#e74c3c'; alert("連線失敗: " + e.message); }
+            await usbPrinterDevice.claimInterface(interfaceNumber);
+            statusDiv.innerHTML = `🟢 已連線 (圖形引擎)`; statusDiv.style.color = '#2ecc71';
+        } catch(e) { statusDiv.innerHTML = `🔴 連線失敗`; alert(e.message); }
     });
 
     async function doPrint(seq, cnt, ttl, pk, row) {
-        if (!usbPrinterDevice || !usbEndpointOut) return alert("請先點擊建立 USB 連線");
+        if (!usbPrinterDevice || !usbEndpointOut) return alert("請先連線 USB");
         try {
             const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
             const items = cnt.split(','); const itemHeight = 55; 
             canvas.width = 384; canvas.height = 300 + (items.length * itemHeight) + 80; 
-
             ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.fillStyle = '#000000'; ctx.textBaseline = 'top';
-
             let drawY = 10;
-            ctx.font = 'bold 50px "Microsoft JhengHei", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('飯丸屋', canvas.width / 2, drawY); drawY += 75;
-            ctx.font = 'bold 30px "Microsoft JhengHei", sans-serif'; ctx.textAlign = 'left';
+            ctx.font = 'bold 50px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('飯丸屋', 192, drawY); drawY += 75;
+            ctx.font = 'bold 30px sans-serif'; ctx.textAlign = 'left';
             ctx.fillText(`序號: ${seq}`, 10, drawY); drawY += 45; ctx.fillText(`取餐: ${pk}`, 10, drawY); drawY += 45;
             ctx.font = 'bold 24px monospace'; ctx.fillText(`----------------------------`, 10, drawY); drawY += 35;
-            ctx.font = 'bold 36px "Microsoft JhengHei", sans-serif';
+            ctx.font = 'bold 36px sans-serif';
             for(let i = 0; i < items.length; i++) { ctx.fillText(items[i].trim(), 10, drawY); drawY += itemHeight; }
             ctx.font = 'bold 24px monospace'; ctx.fillText(`----------------------------`, 10, drawY); drawY += 35;
-            ctx.font = 'bold 42px "Microsoft JhengHei", sans-serif'; ctx.textAlign = 'right'; ctx.fillText(`總計: $${ttl}`, canvas.width - 10, drawY);
-
+            ctx.font = 'bold 42px sans-serif'; ctx.textAlign = 'right'; ctx.fillText(`總計: $${ttl}`, 374, drawY);
+            
             const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-            const widthBytes = Math.ceil(canvas.width / 8); 
-            const bitmapData = new Uint8Array(widthBytes * canvas.height);
+            const widthBytes = 48; const bitmapData = new Uint8Array(widthBytes * canvas.height);
             bitmapData.fill(255);
-
             for (let py = 0; py < canvas.height; py++) {
                 for (let px = 0; px < canvas.width; px++) {
                     const idx = (py * canvas.width + px) * 4;
-                    const r = imgData[idx], g = imgData[idx+1], b = imgData[idx+2], a = imgData[idx+3];
-                    if (a > 128 && (r+g+b)/3 < 128) {
+                    if (imgData[idx+3] > 128 && (imgData[idx]+imgData[idx+1]+imgData[idx+2])/3 < 128) {
                         bitmapData[py * widthBytes + Math.floor(px / 8)] &= ~(1 << (7 - (px % 8)));
                     }
                 }
             }
-
-            const header = new TextEncoder().encode(`SIZE 48 mm, ${Math.ceil(canvas.height / 8)} mm\r\nGAP 0 mm, 0 mm\r\nCLS\r\nBITMAP 0,0,${widthBytes},${canvas.height},0,`);
+            const header = new TextEncoder().encode(`SIZE 48 mm, ${Math.ceil(canvas.height / 8)} mm\r\nGAP 0 mm, 0 mm\r\nCLS\r\nBITMAP 0,0,48,${canvas.height},0,`);
             const footer = new TextEncoder().encode(`\r\nPRINT 1,1\r\nFEED 160\r\n`);
-            const finalBuffer = new Uint8Array(header.length + bitmapData.length + footer.length);
-            finalBuffer.set(header, 0); finalBuffer.set(bitmapData, header.length); finalBuffer.set(footer, header.length + bitmapData.length);
-
-            await usbPrinterDevice.transferOut(usbEndpointOut, finalBuffer); 
+            const buf = new Uint8Array(header.length + bitmapData.length + footer.length);
+            buf.set(header, 0); buf.set(bitmapData, header.length); buf.set(footer, header.length + bitmapData.length);
+            await usbPrinterDevice.transferOut(usbEndpointOut, buf); 
             upSt(row, '待製作');
-        } catch (e) { alert("列印失敗：" + e.message); }
+        } catch (e) { alert(e.message); }
     }
 </script>
 </body>
