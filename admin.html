@@ -15,7 +15,6 @@
         input, select { width: 100%; padding: 15px; margin: 10px 0; border-radius: 8px; border: none; font-size: 16px; box-sizing: border-box; }
         .hardware-panel { background: #2c3e50; padding: 15px; border-radius: 10px; margin-bottom: 15px; border: 1px solid #34495e; }
         .btn-qty { width: 40px; height: 40px; border-radius: 50%; border: none; background: var(--primary); color: white; font-weight: bold; cursor: pointer; }
-        /* 按鈕禁用樣式 */
         button:disabled { background-color: #7f8c8d !important; cursor: not-allowed; opacity: 0.8; }
     </style>
 </head>
@@ -97,7 +96,6 @@
     function startStaffOrder() {
         cart = {}; renderStaffMenu();
         document.getElementById('totalTxt').innerText = "0";
-        // 恢復按鈕狀態
         const btn = document.getElementById('staffSubmitBtn');
         btn.disabled = false;
         btn.innerText = "確認下單";
@@ -130,12 +128,11 @@
         document.getElementById('pickupTime').innerHTML = opts;
     }
 
-    // 【修復重複下單 BUG】
     async function submitStaffOrder() {
         if(Object.keys(cart).length === 0) return alert("請至少選擇一項餐點");
         
         const btn = document.getElementById('staffSubmitBtn');
-        btn.disabled = true; // 立即鎖定按鈕
+        btn.disabled = true;
         btn.innerText = "處理中，請稍候...";
 
         const orderData = { 
@@ -148,7 +145,7 @@
         const res = await apiCall("submitOrder", { orderData: orderData });
         if(res && res.status === "success") {
             cart = {};
-            showPage('adminPage'); // 自動導回列表，防呆成功
+            showPage('adminPage');
         } else {
             alert("下單失敗，請重試");
             btn.disabled = false;
@@ -156,6 +153,7 @@
         }
     }
 
+    // 【修改處】：只有這裡的按鈕排版新增了「待收款的作廢按鈕」
     async function loadOrders() {
         const listDiv = document.getElementById('orderList');
         const orders = await apiCall("getOrders");
@@ -169,7 +167,10 @@
             let actionBtns = isPending ? 
                 `<button class="btn-main" style="background:#e74c3c; margin:0;" onclick="upSt(${o.row},'已作廢')">🗑️ 逾時作廢</button>` :
                 (o.status === "待收款" ? 
-                    `<button class="btn-main" style="background:#f1c40f; color:#000; margin:0;" onclick="upSt(${o.row},'待製作')">💰 確認收款</button>` :
+                    `<div style="display:flex; gap:5px;">
+                        <button class="btn-main" style="background:#f1c40f; color:#000; flex:1; margin:0;" onclick="upSt(${o.row},'待製作')">💰 確認收款</button>
+                        <button class="btn-main" style="background:#e74c3c; color:#fff; flex:0.4; margin:0;" onclick="if(confirm('確定要取消這筆現場單嗎？')) upSt(${o.row},'已作廢')">🗑️</button>
+                    </div>` :
                     `<div style="flex-wrap:wrap; display:flex; gap:5px;">
                         <button class="btn-main" style="background:#e67e22; flex:1; margin:0; font-size:14px;" onclick="doPrint('${o.seq}','${o.content}',${o.total},'${pk}',${o.row})">🖨️ 列印</button>
                         <button class="btn-main" style="background:#2ecc71; flex:1; margin:0; font-size:14px;" onclick="upSt(${o.row},null,'請取餐')">🔔 通知</button>
