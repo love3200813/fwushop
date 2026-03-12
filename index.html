@@ -6,13 +6,26 @@
     <title>飯丸屋點餐系統</title>
     <style>
         :root { --primary: #f39c12; --bg: #1a1a1a; --card: #2d2d2d; }
-        body { font-family: sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 10px; }
-        .page { display: none; max-width: 500px; margin: auto; }
+        body { font-family: sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 15px; }
+        
+        /* 基礎排版 (預設手機) */
+        .page { display: none; margin: auto; max-width: 600px; }
         .active { display: block; }
-        .item-row { background: var(--card); padding: 12px; margin: 5px 0; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border-left: 5px solid var(--primary); }
-        .btn-main { width: 100%; padding: 15px; background: var(--primary); color: #fff; border: none; border-radius: 8px; font-weight: bold; margin-top: 10px; font-size: 18px; cursor: pointer; }
+        .btn-main { width: 100%; padding: 15px; background: var(--primary); color: #fff; border: none; border-radius: 8px; font-weight: bold; margin-top: 10px; font-size: 18px; cursor: pointer; text-align: center;}
+        button:disabled { background-color: #7f8c8d !important; cursor: not-allowed; opacity: 0.8; }
         select, input { width: 100%; padding: 15px; margin: 10px 0; border-radius: 8px; border: none; font-size: 16px; box-sizing: border-box; }
         .notif-banner { background: #3498db; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; text-align: center; cursor: pointer; border: 2px solid #fff;}
+        
+        /* 菜單卡片 */
+        #menu { display: grid; grid-template-columns: 1fr; gap: 10px; }
+        .item-row { background: var(--card); padding: 12px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border-left: 5px solid var(--primary); }
+        .btn-qty { width: 40px; height: 40px; border-radius: 50%; border: none; background: var(--primary); color: white; font-weight: bold; cursor: pointer; font-size: 18px; }
+
+        /* 🖥️ 電腦版響應式：菜單變雙排 */
+        @media (min-width: 768px) {
+            #orderPage.page { max-width: 800px; }
+            #menu { grid-template-columns: 1fr 1fr; }
+        }
     </style>
 </head>
 <body>
@@ -81,6 +94,7 @@
     async function apiCall(action, params = {}) {
         let url = new URL(GAS_API_URL);
         url.searchParams.append('action', action);
+        url.searchParams.append('t', new Date().getTime()); // 防快取
         for (let key in params) url.searchParams.append(key, typeof params[key] === 'object' ? JSON.stringify(params[key]) : params[key]);
         try { const response = await fetch(url); return await response.json(); } catch (e) { return null; }
     }
@@ -110,62 +124,57 @@
         document.getElementById(id).classList.add('active');
     }
 
-    function startGuestOrder() { cart = {}; renderMenu(); document.getElementById('totalTxt').innerText = "0"; document.getElementById('pickupTime').value = "現場取餐"; document.getElementById('payMethod').value = "信用卡"; showPage('orderPage'); }
+    function startGuestOrder() { 
+        cart = {}; renderMenu(); document.getElementById('totalTxt').innerText = "0"; 
+        document.getElementById('pickupTime').value = "現場取餐"; document.getElementById('payMethod').value = "信用卡"; 
+        const btn = document.getElementById('submitBtn'); if(btn) { btn.disabled = false; btn.innerText = "確認點餐"; }
+        showPage('orderPage'); 
+    }
+
     function renderMenu() { document.getElementById('menu').innerHTML = menuItems.map(m => `<div class="item-row"><span>${m.n} ($${m.p})</span><div><button class="btn-qty" onclick="editCart('${m.n}',-1)">-</button><span style="margin:0 10px; width:20px; display:inline-block; text-align:center;">${cart[m.n] || 0}</span><button class="btn-qty" onclick="editCart('${m.n}',1)">+</button></div></div>`).join(''); }
     function editCart(n, d) { cart[n] = (cart[n] || 0) + d; if(cart[n] <= 0) delete cart[n]; renderMenu(); let t = 0; for(let k in cart) t += menuItems.find(i=>i.n===k).p * cart[k]; document.getElementById('totalTxt').innerText = t; }
 
     async function submitOrder() {
         if(Object.keys(cart).length === 0) return alert("請選餐");
+        const btn = document.getElementById('submitBtn'); const oriText = btn.innerText;
+        btn.disabled = true; btn.innerText = "訂單送出中...";
         const orderData = { items: Object.keys(cart).map(k => `${k}x${cart[k]}`).join(','), total: document.getElementById('totalTxt').innerText, pickupTime: document.getElementById('pickupTime').value, payMethod: document.getElementById('payMethod').value };
         const frontendUrl = window.location.href.split('?')[0]; 
         const res = await apiCall("submitOrder", { orderData: orderData, frontendUrl: frontendUrl });
         
-        if (orderData.payMethod === "信用卡" && res && res.ecpayData) {
-            const form = document.getElementById('ecpayForm');
-            form.action = res.ecpayData.ServiceURL;
-            form.target = "_blank"; // 信用卡在新分頁打開
+        if (orderData.payMethod === "信用卡" && res && res.ecpayData && !res.error) {
+            const form = document.getElementById('ecpayForm'); form.action = res.ecpayData.ServiceURL; form.target = "_blank"; 
             form.innerHTML = Object.keys(res.ecpayData).map(key => key!=="ServiceURL" ? `<input type="hidden" name="${key}" value="${res.ecpayData[key]}">` : '').join('');
-            form.submit();
-            startWaiting(res.orderId, res.seqId); 
-        } else if (res) { startWaiting(res.orderId, res.seqId); }
+            form.submit(); startWaiting(res.orderId, res.seqId); 
+        } else if (res && !res.error) { startWaiting(res.orderId, res.seqId); 
+        } else {
+            alert("下單失敗：" + (res && res.error ? res.error : "網路連線異常"));
+            btn.disabled = false; btn.innerText = oriText;
+        }
     }
 
     function startWaiting(id, preloadedSeq) {
-        showPage('waitPage');
-        document.getElementById('waitSeq').innerText = preloadedSeq ? preloadedSeq : "查詢中...";
+        showPage('waitPage'); document.getElementById('waitSeq').innerText = preloadedSeq ? preloadedSeq : "查詢中...";
         const fetchStatus = async () => {
             const res = await apiCall("checkMyOrder", { id: id });
             if(res && !res.error) {
                 document.getElementById('waitSeq').innerText = res.seqId;
                 const pk = formatPickupTime(res.pickup); 
                 document.getElementById('waitInfo').innerHTML = `<div style="color:#f39c12; font-weight:bold;">📝 內容：</div><div>${res.items.split(',').join('<br>')}</div><div style="color:#2ecc71; font-weight:bold;">⏰ 取餐：${pk}</div>`;
-                
                 let notifyTxt = res.status === '待付款' ? "💳 待付款確認中..." : (res.status === '待收款' ? "💵 請至櫃檯結帳..." : "🍳 餐點準備中...");
                 document.getElementById('waitNotify').innerText = notifyTxt;
                 
-                if (res.status === "已作廢") {
-                    document.getElementById('waitNotify').innerText = "🚫 此訂單已作廢"; clearInterval(waitTimer); stopAudioManual();
-                } else if(res.notify === "請取餐") { 
-                    document.getElementById('waitNotify').innerText = "🔔 請至櫃檯取餐！"; playNotificationSound(); clearInterval(waitTimer); 
-                } else if(res.status === "已完成") { 
-                    document.getElementById('waitNotify').innerText = "✅ 訂單已結案"; clearInterval(waitTimer); stopAudioManual(); 
-                }
+                if (res.status === "已作廢") { document.getElementById('waitNotify').innerText = "🚫 此訂單已作廢"; clearInterval(waitTimer); stopAudioManual();
+                } else if(res.notify === "請取餐") { document.getElementById('waitNotify').innerText = "🔔 請至櫃檯取餐！"; playNotificationSound(); clearInterval(waitTimer); 
+                } else if(res.status === "已完成") { document.getElementById('waitNotify').innerText = "✅ 訂單已結案"; clearInterval(waitTimer); stopAudioManual(); }
             }
         };
-        fetchStatus(); 
-        if(waitTimer) clearInterval(waitTimer);
-        waitTimer = setInterval(fetchStatus, 5000); 
+        fetchStatus(); if(waitTimer) clearInterval(waitTimer); waitTimer = setInterval(fetchStatus, 5000); 
     }
 
     function playNotificationSound() { const a = document.getElementById('notifSound'); a.loop = true; a.play().catch(e=>{}); document.getElementById('stopAudioBtn').style.display = "block"; if(audioTimeout) clearTimeout(audioTimeout); audioTimeout = setTimeout(stopAudioManual, 600000); }
     function stopAudioManual() { const a = document.getElementById('notifSound'); a.pause(); a.currentTime = 0; a.loop = false; document.getElementById('stopAudioBtn').style.display = "none"; if(audioTimeout) clearTimeout(audioTimeout); }
-    function enableAudio() { 
-        document.getElementById('notifSound').play().then(() => {
-            document.getElementById('notifSound').pause();
-            document.getElementById('clickHint').innerText = "✅ 語音提醒已準備就緒";
-            document.getElementById('clickHint').style.background = "#2ecc71";
-        }); 
-    }
+    function enableAudio() { document.getElementById('notifSound').play().then(() => { document.getElementById('notifSound').pause(); document.getElementById('clickHint').innerText = "✅ 語音提醒已準備就緒"; document.getElementById('clickHint').style.background = "#2ecc71"; }); }
     function queryOrder() { const id = document.getElementById('queryInput').value.trim(); if(id) startWaiting(id); else alert("請輸入單號"); }
 </script>
 </body>
