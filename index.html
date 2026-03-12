@@ -104,13 +104,30 @@
     // ==========================================
     // ⚠️ 必填區：將你剛剛複製的 GAS 網址貼在引號裡面
     // ==========================================
-    const GAS_API_URL = "https://script.google.com/macros/s/AKfycbz0HQ7EsRj1kFhP-UT9DIn90WgXt7q-H8vkEh3fD79_4BuCm5HnCFGF9q3h1mf6pY4s/exec"; 
+    const GAS_API_URL = "請把剛剛的_網址_貼在這裡"; 
 
     const menuItems = [
         {n:"招牌午餐肉", p:65}, {n:"炸蝦塔塔", p:95}, {n:"咖哩可樂餅", p:85}, {n:"日式炸雞", p:90}, {n:"經典雙拼", p:120}, {n:"沖繩豆乳", p:45}, {n:"花生醬厚牛", p:110}, {n:"宇治抹茶", p:55}
     ];
     let cart = {}; let isStaffSession = false; let waitTimer = null; let adminAutoRefreshTimer = null; let audioTimeout = null;
     let activeConnMode = 'usb'; let blePrinterChar = null; let usbPrinterDevice = null; let usbEndpointOut = null;
+
+    // 【時間格式轉換器】自動抓取今天日期 + 預約時間
+    function formatPickupTime(val) {
+        if (typeof val === 'string' && val.includes('1899')) {
+            const d = new Date(val);
+            if (!isNaN(d)) {
+                const today = new Date();
+                const yyyy = today.getFullYear();
+                const mm = String(today.getMonth() + 1).padStart(2, '0');
+                const dd = String(today.getDate()).padStart(2, '0');
+                const hh = String(d.getHours()).padStart(2, '0');
+                const min = String(d.getMinutes()).padStart(2, '0');
+                return `${yyyy}/${mm}/${dd} ${hh}:${min}`; 
+            }
+        }
+        return val;
+    }
 
     async function apiCall(action, params = {}) {
         let url = new URL(GAS_API_URL);
@@ -194,12 +211,14 @@
         if (!orders) return;
         
         listDiv.innerHTML = orders.map(o => {
+            const pk = formatPickupTime(o.pickup); // 使用轉換器
+            
             let actionBtns = o.status === "待收款" ? 
                 `<button class="btn-main" style="background:#f1c40f; color:#000; margin:0;" onclick="upSt(${o.row},'待製作');alert('收款成功！');">💰 確認收款</button>` :
-                `<button class="btn-main" style="background:#e67e22; flex:1; margin:0;" onclick="doPrint('${o.seq}','${o.content}',${o.total},'${o.pickup}',${o.row})">🖨️ 列印</button>
+                `<button class="btn-main" style="background:#e67e22; flex:1; margin:0;" onclick="doPrint('${o.seq}','${o.content}',${o.total},'${pk}',${o.row})">🖨️ 列印</button>
                  <button class="btn-main" style="background:#2ecc71; flex:1; margin:0;" onclick="upSt(${o.row},null,'請取餐');alert('已通知！');">🔔 通知</button>
                  <button class="btn-main" style="background:#666; flex:1; margin:0;" onclick="upSt(${o.row},'已完成')">✅ 完成</button>`;
-            return `<div class="order-card"><div style="display:flex; justify-content:space-between;"><b>${o.seq}</b><span style="background:#e74c3c; padding:2px 8px; border-radius:4px;">${o.pickup}</span></div><small>[${o.status}]</small><br>${o.content}<br>$${o.total} (${o.pay})<div style="display:flex; gap:10px; margin-top:10px;">${actionBtns}</div></div>`;
+            return `<div class="order-card"><div style="display:flex; justify-content:space-between;"><b>${o.seq}</b><span style="background:#e74c3c; padding:2px 8px; border-radius:4px;">${pk}</span></div><small>[${o.status}]</small><br>${o.content}<br>$${o.total} (${o.pay})<div style="display:flex; gap:10px; margin-top:10px;">${actionBtns}</div></div>`;
         }).join('') || "目前無待處理訂單";
     }
 
@@ -213,7 +232,8 @@
             const res = await apiCall("checkMyOrder", { id: id });
             if(res && !res.error) {
                 document.getElementById('waitSeq').innerText = res.seqId;
-                document.getElementById('waitInfo').innerHTML = `<div style="color:#f39c12; font-weight:bold;">📝 內容：</div><div>${res.items.split(',').join('<br>')}</div><div style="color:#2ecc71; font-weight:bold;">⏰ 取餐：${res.pickup}</div>`;
+                const pk = formatPickupTime(res.pickup); // 使用轉換器
+                document.getElementById('waitInfo').innerHTML = `<div style="color:#f39c12; font-weight:bold;">📝 內容：</div><div>${res.items.split(',').join('<br>')}</div><div style="color:#2ecc71; font-weight:bold;">⏰ 取餐：${pk}</div>`;
                 
                 let notifyTxt = res.status === '待付款' ? "💳 待付款確認中..." : (res.status === '待收款' ? "💵 請至櫃檯結帳..." : "🍳 餐點準備中...");
                 document.getElementById('waitNotify').innerText = notifyTxt;
@@ -282,7 +302,7 @@
     }
 
     // ==========================================
-    // 🎨 【訊號修正版】：黑白反轉 + 超大字體 + 出紙 2 公分
+    // 🎨 TSPL Canvas 圖形化列印引擎 (黑白反轉 + 出紙2公分)
     // ==========================================
     async function doPrint(seq, cnt, ttl, pk, row) {
         try {
@@ -297,11 +317,8 @@
             canvas.width = canvasWidth;
             canvas.height = canvasHeight;
 
-            // 1. 塗上純白背景
             ctx.fillStyle = '#FFFFFF';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // 2. 畫上純黑字體
             ctx.fillStyle = '#000000';
             ctx.textBaseline = 'top';
 
@@ -337,31 +354,24 @@
             ctx.textAlign = 'right';
             ctx.fillText(`總計: $${ttl}`, canvasWidth - 10, drawY);
 
-            // 3. 轉換為點陣圖 (處理 Xprinter 的黑白顛倒訊號)
             const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
             const widthBytes = Math.ceil(canvas.width / 8); 
             const bitmapData = new Uint8Array(widthBytes * canvas.height);
 
-            // 【關鍵修復】：因為這台機器的 0 是印黑墨，1 是不印墨(白色)。
-            // 所以我們先把整張畫布填滿 1 (255 = 11111111)，代表全部留白。
             bitmapData.fill(255);
 
             for (let py = 0; py < canvas.height; py++) {
                 for (let px = 0; px < canvas.width; px++) {
                     const idx = (py * canvas.width + px) * 4;
                     const r = imgData[idx], g = imgData[idx+1], b = imgData[idx+2], a = imgData[idx+3];
-                    
-                    // 如果抓到像素是黑色的 (代表是文字)
                     if (a > 128 && (r+g+b)/3 < 128) {
                         const byteIndex = py * widthBytes + Math.floor(px / 8);
                         const bitIndex = 7 - (px % 8);
-                        // 就把這個位元「挖空變成 0」，機器就會在這裡噴出黑墨！
                         bitmapData[byteIndex] &= ~(1 << bitIndex);
                     }
                 }
             }
 
-            // 4. 打包 TSPL 指令
             const height_mm = Math.ceil(canvas.height / 8);
             const headerStr = `SIZE 48 mm, ${height_mm} mm\r\nGAP 0 mm, 0 mm\r\nCLS\r\nBITMAP 0,0,${widthBytes},${canvas.height},0,`;
             const header = new TextEncoder().encode(headerStr);
@@ -372,7 +382,6 @@
             finalBuffer.set(bitmapData, header.length);
             finalBuffer.set(footer, header.length + bitmapData.length);
 
-            // 5. 送出列印
             await sendDataToPrinter(finalBuffer);
             upSt(row, '待製作');
 
