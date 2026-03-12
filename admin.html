@@ -166,7 +166,18 @@
         }).join('') || "<div style='text-align:center; padding:20px;'>目前無待處理訂單</div>";
     }
 
-    async function doShiftCheckout() { if(confirm("確定進行交班結算？")) { const res = await apiCall("getShiftReport"); alert(res); } }
+    // 【修改處】：交班結算改為自動呼叫新的 doPrintReport 進行列印
+    async function doShiftCheckout() { 
+        if(confirm("確定進行交班結算嗎？(按下確定將自動印出結算單)")) { 
+            const res = await apiCall("getShiftReport"); 
+            if(res) {
+                // 呼叫專屬報表列印引擎
+                await doPrintReport(res);
+                alert("✅ 結算單已送出列印！");
+            }
+        } 
+    }
+    
     async function upSt(r, s, n) { await apiCall("updateStatus", { row: r, status: s||"null", notify: n||"null" }); loadOrders(); }
 
     document.getElementById('btBtn').addEventListener('click', async () => {
@@ -197,6 +208,7 @@
         } catch(e) { statusDiv.innerHTML = `🔴 連線失敗`; alert(e.message); }
     });
 
+    // --- (原版) 餐點訂單列印引擎 ---
     async function doPrint(seq, cnt, ttl, pk, row) {
         if (!usbPrinterDevice || !usbEndpointOut) return alert("請先連線 USB");
         try {
@@ -233,6 +245,73 @@
             await usbPrinterDevice.transferOut(usbEndpointOut, buf); 
             upSt(row, '待製作');
         } catch (e) { alert(e.message); }
+    }
+
+    // --- 【純新增】：交班結算單專用列印引擎 ---
+    async function doPrintReport(reportText) {
+        if (!usbPrinterDevice || !usbEndpointOut) return alert("列印失敗：請先點擊建立 USB 連線");
+        try {
+            const canvas = document.createElement('canvas'); 
+            const ctx = canvas.getContext('2d');
+            
+            // 將後端傳來的換行符號 \n 切割成陣列
+            const lines = reportText.split('\n'); 
+            const lineHeight = 40; 
+            
+            canvas.width = 384; 
+            // 動態計算報表總高度
+            canvas.height = 100 + (lines.length * lineHeight) + 80; 
+
+            // 白色背景
+            ctx.fillStyle = '#FFFFFF'; 
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // 黑色字體
+            ctx.fillStyle = '#000000'; 
+            ctx.textBaseline = 'top';
+
+            let drawY = 20;
+            // 畫上大標題
+            ctx.font = 'bold 36px sans-serif'; 
+            ctx.textAlign = 'center'; 
+            ctx.fillText('🧾 店舖交班結算單', 192, drawY); 
+            drawY += 60;
+            
+            // 逐行畫出報表內容
+            ctx.font = 'bold 26px sans-serif'; 
+            ctx.textAlign = 'left';
+            for(let i = 0; i < lines.length; i++) { 
+                ctx.fillText(lines[i].trim(), 10, drawY); 
+                drawY += lineHeight; 
+            }
+
+            // 轉換成點陣圖 (與你測試成功的方法 100% 相同)
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+            const widthBytes = 48; 
+            const bitmapData = new Uint8Array(widthBytes * canvas.height);
+            bitmapData.fill(255);
+            
+            for (let py = 0; py < canvas.height; py++) {
+                for (let px = 0; px < canvas.width; px++) {
+                    const idx = (py * canvas.width + px) * 4;
+                    if (imgData[idx+3] > 128 && (imgData[idx]+imgData[idx+1]+imgData[idx+2])/3 < 128) {
+                        bitmapData[py * widthBytes + Math.floor(px / 8)] &= ~(1 << (7 - (px % 8)));
+                    }
+                }
+            }
+
+            // 打包傳送 (包含自動吐紙 FEED 160)
+            const header = new TextEncoder().encode(`SIZE 48 mm, ${Math.ceil(canvas.height / 8)} mm\r\nGAP 0 mm, 0 mm\r\nCLS\r\nBITMAP 0,0,48,${canvas.height},0,`);
+            const footer = new TextEncoder().encode(`\r\nPRINT 1,1\r\nFEED 160\r\n`);
+            const buf = new Uint8Array(header.length + bitmapData.length + footer.length);
+            buf.set(header, 0); 
+            buf.set(bitmapData, header.length); 
+            buf.set(footer, header.length + bitmapData.length);
+            
+            await usbPrinterDevice.transferOut(usbEndpointOut, buf); 
+        } catch (e) { 
+            alert("結算單列印失敗：" + e.message); 
+            console.error(e);
+        }
     }
 </script>
 </body>
