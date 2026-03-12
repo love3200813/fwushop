@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        :root { --primary: #f39c12; --bg: #1a1a1a; --card: #2d2d2d; }
+        body { font-family: sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 10px; }
+        .page { display: none; max-width: 500px; margin: auto; }
+        .active { display: block; }
+        .item-row { background: var(--card); padding: 12px; margin: 5px 0; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border-left: 5px solid var(--primary); }
+        .btn-main { width: 100%; padding: 15px; background: var(--primary); color: #fff; border: none; border-radius: 8px; font-weight: bold; margin-top: 10px; font-size: 18px; cursor: pointer; }
+        .order-card { background: #333; margin: 15px 0; padding: 15px; border-radius: 12px; border-left: 5px solid var(--primary); }
+        select, input { width: 100%; padding: 15px; margin: 10px 0; border-radius: 8px; border: none; font-size: 16px; box-sizing: border-box; }
+        .admin-link { display: block; text-align: center; margin-top: 50px; font-size: 10px; color: #333; text-decoration: none; }
+        .notif-banner { background: #e74c3c; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; text-align: center; animation: pulse 2s infinite; cursor: pointer; }
+        @keyframes pulse { 0% {opacity: 1;} 50% {opacity: 0.6;} 100% {opacity: 1;} }
+        .hardware-panel { background: #2c3e50; padding: 15px; border-radius: 10px; margin-bottom: 15px; border: 1px solid #34495e; }
+        .hardware-select { padding: 10px; font-size: 14px; background: #1a1a1a; color: #fff; margin-bottom: 10px; width: 100%; }
+    </style>
+</head>
+<body>
+
+<div id="homePage" class="page active">
+    <h2 style="text-align:center; color:var(--primary); margin-top:50px;">🍙 飯丸屋沖繩飯糰</h2>
+    <button class="btn-main" style="background:#2ecc71; font-size:24px; padding:30px; margin-top:30px;" onclick="startGuestOrder()">🍱 開始點餐</button>
+    <button class="btn-main" style="background:#3498db" onclick="showPage('queryPage')">🔍 查詢我的訂單</button>
+    <a href="javascript:void(0)" class="admin-link" onclick="showPage('loginPage')">── Admin Login ──</a>
+</div>
+
+<div id="loginPage" class="page" style="text-align:center; padding-top:50px;">
+    <h2>店家後台登入</h2>
+    <input type="password" id="pwInput" placeholder="請輸入密碼">
+    <button class="btn-main" onclick="login()">登入</button>
+    <button class="btn-main" style="background:#666" onclick="showPage('homePage')">返回首頁</button>
+</div>
+
+<div id="mainPage" class="page">
+    <h2 style="text-align:center; color:var(--primary)">後台管理選單</h2>
+    <button class="btn-main" style="background:#2ecc71" onclick="staffMode()">🍱 現場點餐模式</button>
+    <button class="btn-main" style="background:#3498db" onclick="showPage('adminPage')">📋 即時訂單列表</button>
+    <button class="btn-main" style="background:#9b59b6" onclick="doShiftCheckout()">📊 今日交班結算</button>
+    <button class="btn-main" style="background:#666" onclick="logout()">登出系統</button>
+</div>
+
+<div id="adminPage" class="page">
+    <div class="hardware-panel">
+        <div style="font-weight:bold; margin-bottom:10px; color:var(--primary);">⚙️ 出單機設定 (純淨圖形引擎版)</div>
+        <div style="display:flex; gap:10px;">
+            <select id="printerConn" class="hardware-select">
+                <option value="usb">USB 線材連線</option>
+                <option value="ble">藍牙 BLE 連線</option>
+            </select>
+        </div>
+        <button id="btBtn" class="btn-main" style="background:#e67e22; margin-top:0; font-size:16px; padding:12px;">🔌 建立連線</button>
+        <div id="printerStatus" style="font-size:14px; font-weight:bold; color:#e74c3c; margin-top:10px; text-align:center;">🔴 尚未連線</div>
+    </div>
+
+    <div style="display:flex; gap:5px; align-items:center;">
+        <button class="btn-main" style="background:#3498db; flex:1; font-size:14px;" onclick="loadOrders()">🔄 手動刷新列表</button>
+    </div>
+    <div style="text-align:center; font-size:12px; color:#aaa; margin-top:10px;">🟢 系統已開啟每 5 秒自動更新</div>
+    <div id="orderList" style="margin-top:10px"></div>
+    <button class="btn-main" style="background:#666" onclick="showPage('mainPage')">返回選單</button>
+</div>
+
+<div id="orderPage" class="page">
+    <h3 id="orderTitle">🍙 選擇餐點</h3>
+    <div id="menu"></div>
+    <div style="background:#333; padding:15px; border-radius:10px; margin-top:15px">
+        <label>取餐時間：</label>
+        <select id="pickupTime" onchange="checkPaymentRules()"></select>
+        <label>付款方式：</label>
+        <select id="payMethod" onchange="checkPaymentRules()">
+            <option value="信用卡">💳 信用卡 (線上預付)</option>
+            <option value="現金">💵 現場付款 (到店結帳)</option>
+        </select>
+        <h2 style="text-align:right;">總計: $<span id="totalTxt">0</span></h2>
+        <button id="submitBtn" class="btn-main" onclick="submitOrder()">確認點餐</button>
+        <button class="btn-main" style="background:#666" onclick="smartBack()">返回</button>
+    </div>
+</div>
+
+<div id="waitPage" class="page" style="text-align:center;">
+    <div class="notif-banner" id="clickHint" onclick="enableAudio()">🔔 點擊此處啟用鈴聲</div>
+    <div id="stayWarning" style="background: #e67e22; color: #fff; padding: 12px; border-radius: 8px; margin-bottom: 20px; font-size: 20px; font-weight: bold; border: 2px solid #fff;">⚠️ 請停留在本畫面等待取餐通知</div>
+    <h1 id="waitSeq" style="font-size:85px; color:var(--primary); margin: 15px 0;">查詢中...</h1>
+    <h2 id="waitNotify" style="margin-bottom: 20px;">⏳ 連線資料庫中</h2>
+    <button id="stopAudioBtn" class="btn-main" style="background:#e74c3c; display:none; margin-bottom: 20px;" onclick="stopAudioManual()">✅ 我已收到，關閉鈴聲</button>
+    <div id="waitInfo" style="text-align:left; background:#2c3e50; padding:20px; border-radius:12px; font-size:18px;"></div>
+    <button class="btn-main" style="background:#666; margin-top:30px;" onclick="smartBack()">結束並返回首頁</button>
+</div>
+
+<div id="queryPage" class="page">
+    <h3>訂單查詢</h3>
+    <input type="text" id="queryInput" placeholder="輸入長單號 或 取餐號">
+    <button class="btn-main" onclick="queryOrder()">送出查詢</button>
+    <button class="btn-main" style="background:#666" onclick="showPage('homePage')">返回</button>
+</div>
+
+<form id="ecpayForm" method="post" action="" style="display:none"></form>
+<audio id="notifSound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
+
+<script>
+    // ==========================================
+    // ⚠️ 必填區：將你剛剛複製的 GAS 網址貼在引號裡面
+    // ==========================================
+    const GAS_API_URL = "https://script.google.com/macros/s/AKfycbz0HQ7EsRj1kFhP-UT9DIn90WgXt7q-H8vkEh3fD79_4BuCm5HnCFGF9q3h1mf6pY4s/exec"; 
+
+    const menuItems = [
+        {n:"招牌午餐肉", p:65}, {n:"炸蝦塔塔", p:95}, {n:"咖哩可樂餅", p:85}, {n:"日式炸雞", p:90}, {n:"經典雙拼", p:120}, {n:"沖繩豆乳", p:45}, {n:"花生醬厚牛", p:110}, {n:"宇治抹茶", p:55}
+    ];
+    let cart = {}; let isStaffSession = false; let waitTimer = null; let adminAutoRefreshTimer = null; let audioTimeout = null;
+    let activeConnMode = 'usb'; let blePrinterChar = null; let usbPrinterDevice = null; let usbEndpointOut = null;
+
+    async function apiCall(action, params = {}) {
+        let url = new URL(GAS_API_URL);
+        url.searchParams.append('action', action);
+        for (let key in params) { url.searchParams.append(key, typeof params[key] === 'object' ? JSON.stringify(params[key]) : params[key]); }
+        try {
+            const response = await fetch(url);
+            return await response.json();
+        } catch (e) { console.error("API Error", e); return null; }
+    }
+
+    window.onload = () => { 
+        renderMenu(); generateTimeOptions();
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('MerchantTradeNo')) {
+            startWaiting(urlParams.get('MerchantTradeNo'), urlParams.get('seq') || "查詢中...");
+        }
+    };
+
+    function generateTimeOptions() {
+        let opts = `<option value="現場取餐">現場取餐 (盡快)</option>`;
+        for(let h=11; h<=18; h++) { opts += `<option value="${h}:00">${h}:00</option><option value="${h}:30">${h}:30</option>`; }
+        opts += `<option value="19:00">19:00</option>`;
+        document.getElementById('pickupTime').innerHTML = opts;
+    }
+
+    function checkPaymentRules() {
+        const timeSelect = document.getElementById('pickupTime');
+        const paySelect = document.getElementById('payMethod');
+        if (timeSelect.value !== "現場取餐" && paySelect.value === "現金") { alert("⚠️ 預約需使用【信用卡】線上預付！"); paySelect.value = "信用卡"; }
+        if (paySelect.value === "現金" && timeSelect.value !== "現場取餐") { alert("⚠️ 現場付款僅限【現場取餐】！"); timeSelect.value = "現場取餐"; }
+    }
+
+    function showPage(id) {
+        if(waitTimer) { clearInterval(waitTimer); waitTimer = null; }
+        if(adminAutoRefreshTimer) { clearInterval(adminAutoRefreshTimer); adminAutoRefreshTimer = null; }
+        stopAudioManual(); 
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+        if(id === 'adminPage') { loadOrders(); adminAutoRefreshTimer = setInterval(loadOrders, 5000); }
+    }
+
+    function startGuestOrder() { isStaffSession = false; cart = {}; renderMenu(); document.getElementById('totalTxt').innerText = "0"; document.getElementById('pickupTime').value = "現場取餐"; document.getElementById('payMethod').value = "信用卡"; showPage('orderPage'); }
+    function staffMode() { isStaffSession = true; cart = {}; renderMenu(); document.getElementById('totalTxt').innerText = "0"; document.getElementById('pickupTime').value = "現場取餐"; document.getElementById('payMethod').value = "現金"; showPage('orderPage'); }
+    function smartBack() { if(isStaffSession) showPage('mainPage'); else showPage('homePage'); }
+    function logout() { isStaffSession = false; location.reload(); }
+
+    function renderMenu() {
+        document.getElementById('menu').innerHTML = menuItems.map(m => `
+            <div class="item-row">
+                <span>${m.n} ($${m.p})</span>
+                <div>
+                    <button class="btn-qty" onclick="editCart('${m.n}',-1)">-</button>
+                    <span style="margin:0 10px; width:20px; display:inline-block; text-align:center;">${cart[m.n] || 0}</span>
+                    <button class="btn-qty" onclick="editCart('${m.n}',1)">+</button>
+                </div>
+            </div>`).join('');
+    }
+
+    function editCart(n, d) { cart[n] = (cart[n] || 0) + d; if(cart[n] <= 0) delete cart[n]; renderMenu(); let t = 0; for(let k in cart) t += menuItems.find(i=>i.n===k).p * cart[k]; document.getElementById('totalTxt').innerText = t; }
+
+    async function submitOrder() {
+        if(Object.keys(cart).length === 0) return alert("請選餐");
+        const orderData = { items: Object.keys(cart).map(k => `${k}x${cart[k]}`).join(','), total: document.getElementById('totalTxt').innerText, pickupTime: document.getElementById('pickupTime').value, payMethod: document.getElementById('payMethod').value };
+        const frontendUrl = window.location.href.split('?')[0]; 
+        
+        const res = await apiCall("submitOrder", { orderData: orderData, frontendUrl: frontendUrl });
+        
+        if (orderData.payMethod === "信用卡" && res && res.ecpayData) {
+            const form = document.getElementById('ecpayForm');
+            form.action = res.ecpayData.ServiceURL;
+            form.innerHTML = Object.keys(res.ecpayData).map(key => key!=="ServiceURL" ? `<input type="hidden" name="${key}" value="${res.ecpayData[key]}">` : '').join('');
+            form.submit();
+        } else if (res) { startWaiting(res.orderId, res.seqId); }
+    }
+
+    async function loadOrders() {
+        const listDiv = document.getElementById('orderList');
+        if(listDiv.innerHTML === "") listDiv.innerHTML = "⏳ 讀取中...";
+        const orders = await apiCall("getOrders");
+        if (!orders) return;
+        
+        listDiv.innerHTML = orders.map(o => {
+            let actionBtns = o.status === "待收款" ? 
+                `<button class="btn-main" style="background:#f1c40f; color:#000; margin:0;" onclick="upSt(${o.row},'待製作');alert('收款成功！');">💰 確認收款</button>` :
+                `<button class="btn-main" style="background:#e67e22; flex:1; margin:0;" onclick="doPrint('${o.seq}','${o.content}',${o.total},'${o.pickup}',${o.row})">🖨️ 列印</button>
+                 <button class="btn-main" style="background:#2ecc71; flex:1; margin:0;" onclick="upSt(${o.row},null,'請取餐');alert('已通知！');">🔔 通知</button>
+                 <button class="btn-main" style="background:#666; flex:1; margin:0;" onclick="upSt(${o.row},'已完成')">✅ 完成</button>`;
+            return `<div class="order-card"><div style="display:flex; justify-content:space-between;"><b>${o.seq}</b><span style="background:#e74c3c; padding:2px 8px; border-radius:4px;">${o.pickup}</span></div><small>[${o.status}]</small><br>${o.content}<br>$${o.total} (${o.pay})<div style="display:flex; gap:10px; margin-top:10px;">${actionBtns}</div></div>`;
+        }).join('') || "目前無待處理訂單";
+    }
+
+    async function doShiftCheckout() { if(confirm("確定進行交班結算嗎？")) { const res = await apiCall("getShiftReport"); alert(res); } }
+    async function upSt(r, s, n) { await apiCall("updateStatus", { row: r, status: s||"null", notify: n||"null" }); loadOrders(); }
+
+    function startWaiting(id, preloadedSeq) {
+        showPage('waitPage');
+        document.getElementById('waitSeq').innerText = preloadedSeq ? preloadedSeq : "查詢中...";
+        const fetchStatus = async () => {
+            const res = await apiCall("checkMyOrder", { id: id });
+            if(res && !res.error) {
+                document.getElementById('waitSeq').innerText = res.seqId;
+                document.getElementById('waitInfo').innerHTML = `<div style="color:#f39c12; font-weight:bold;">📝 內容：</div><div>${res.items.split(',').join('<br>')}</div><div style="color:#2ecc71; font-weight:bold;">⏰ 取餐：${res.pickup}</div>`;
+                
+                let notifyTxt = res.status === '待付款' ? "💳 待付款確認中..." : (res.status === '待收款' ? "💵 請至櫃檯結帳..." : "🍳 餐點準備中...");
+                document.getElementById('waitNotify').innerText = notifyTxt;
+                
+                if(res.notify === "請取餐") { document.getElementById('waitNotify').innerText = "🔔 請至櫃檯取餐！"; document.getElementById('stayWarning').style.display = "none"; playNotificationSound(); if(waitTimer) clearInterval(waitTimer); } 
+                else if(res.status === "已完成") { document.getElementById('waitNotify').innerText = "✅ 訂單已結案"; document.getElementById('stayWarning').style.display = "none"; if(waitTimer) clearInterval(waitTimer); }
+            }
+        };
+        fetchStatus(); 
+        if(waitTimer) clearInterval(waitTimer);
+        waitTimer = setInterval(fetchStatus, 5000); 
+    }
+
+    function playNotificationSound() { const a = document.getElementById('notifSound'); a.loop = true; a.play().catch(e=>{}); document.getElementById('stopAudioBtn').style.display = "block"; if(audioTimeout) clearTimeout(audioTimeout); audioTimeout = setTimeout(stopAudioManual, 600000); }
+    function stopAudioManual() { const a = document.getElementById('notifSound'); a.pause(); a.currentTime = 0; a.loop = false; document.getElementById('stopAudioBtn').style.display = "none"; if(audioTimeout) clearTimeout(audioTimeout); }
+    function enableAudio() { document.getElementById('notifSound').play().then(() => document.getElementById('notifSound').pause()); }
+    async function login() { const res = await apiCall("login", { pw: document.getElementById('pwInput').value }); if(res) showPage('mainPage'); else alert('密碼錯誤'); }
+    function queryOrder() { const id = document.getElementById('queryInput').value.trim(); if(id) startWaiting(id); else alert("請輸入單號"); }
+
+    // ==========================================
+    // 硬體通訊模組 (WebUSB)
+    // ==========================================
+    document.getElementById('btBtn').addEventListener('click', async () => {
+        activeConnMode = document.getElementById('printerConn').value;
+        const statusDiv = document.getElementById('printerStatus');
+
+        try {
+            if (activeConnMode === 'usb') {
+                usbPrinterDevice = await navigator.usb.requestDevice({ filters: [{ classCode: 0 }, { classCode: 7 }, { classCode: 255 }] });
+                await usbPrinterDevice.open();
+                if (usbPrinterDevice.configuration === null) await usbPrinterDevice.selectConfiguration(1);
+                
+                let interfaceNumber = null;
+                for (let config of usbPrinterDevice.configurations) {
+                    for (let intf of config.interfaces) {
+                        for (let alt of intf.alternates) {
+                            if (alt.interfaceClass === 7 || alt.interfaceClass === 255) { 
+                                interfaceNumber = intf.interfaceNumber;
+                                for (let ep of alt.endpoints) { if (ep.direction === 'out') usbEndpointOut = ep.endpointNumber; }
+                            }
+                        }
+                    }
+                }
+                
+                if (usbEndpointOut === null) {
+                    for (let intf of usbPrinterDevice.configuration.interfaces) {
+                        interfaceNumber = intf.interfaceNumber;
+                        for (let ep of intf.alternates[0].endpoints) { if (ep.direction === 'out') { usbEndpointOut = ep.endpointNumber; break; } }
+                        if(usbEndpointOut !== null) break;
+                    }
+                }
+
+                if (usbEndpointOut !== null) {
+                    await usbPrinterDevice.claimInterface(interfaceNumber);
+                    statusDiv.innerHTML = `🟢 已連線 (USB - 圖形引擎)`;
+                    statusDiv.style.color = '#2ecc71';
+                } else { throw new Error("無法取得 USB 印表機的寫入權限"); }
+            }
+        } catch(e) { statusDiv.innerHTML = `🔴 連線失敗`; statusDiv.style.color = '#e74c3c'; alert("連線失敗: " + e.message); }
+    });
+
+    async function sendDataToPrinter(buffer) {
+        if (activeConnMode === 'usb' && usbPrinterDevice && usbEndpointOut) { 
+            await usbPrinterDevice.transferOut(usbEndpointOut, buffer); 
+        } else { throw new Error("請先點擊建立連線按鈕。"); }
+    }
+
+    // ==========================================
+    // 🎨 【訊號修正版】：黑白反轉 + 超大字體 + 出紙 2 公分
+    // ==========================================
+    async function doPrint(seq, cnt, ttl, pk, row) {
+        try {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            const canvasWidth = 384; 
+            const items = cnt.split(',');
+            const itemHeight = 55; 
+            const canvasHeight = 300 + (items.length * itemHeight) + 80; 
+            
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+
+            // 1. 塗上純白背景
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // 2. 畫上純黑字體
+            ctx.fillStyle = '#000000';
+            ctx.textBaseline = 'top';
+
+            let drawY = 10;
+
+            ctx.font = 'bold 50px "Microsoft JhengHei", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('飯丸屋', canvasWidth / 2, drawY);
+            drawY += 75;
+
+            ctx.font = 'bold 30px "Microsoft JhengHei", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(`序號: ${seq}`, 10, drawY);
+            drawY += 45;
+            ctx.fillText(`取餐: ${pk}`, 10, drawY);
+            drawY += 45;
+            
+            ctx.font = 'bold 24px monospace';
+            ctx.fillText(`----------------------------`, 10, drawY);
+            drawY += 35;
+
+            ctx.font = 'bold 36px "Microsoft JhengHei", sans-serif';
+            for(let i = 0; i < items.length; i++) {
+                ctx.fillText(items[i].trim(), 10, drawY);
+                drawY += itemHeight;
+            }
+
+            ctx.font = 'bold 24px monospace';
+            ctx.fillText(`----------------------------`, 10, drawY);
+            drawY += 35;
+
+            ctx.font = 'bold 42px "Microsoft JhengHei", sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(`總計: $${ttl}`, canvasWidth - 10, drawY);
+
+            // 3. 轉換為點陣圖 (處理 Xprinter 的黑白顛倒訊號)
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+            const widthBytes = Math.ceil(canvas.width / 8); 
+            const bitmapData = new Uint8Array(widthBytes * canvas.height);
+
+            // 【關鍵修復】：因為這台機器的 0 是印黑墨，1 是不印墨(白色)。
+            // 所以我們先把整張畫布填滿 1 (255 = 11111111)，代表全部留白。
+            bitmapData.fill(255);
+
+            for (let py = 0; py < canvas.height; py++) {
+                for (let px = 0; px < canvas.width; px++) {
+                    const idx = (py * canvas.width + px) * 4;
+                    const r = imgData[idx], g = imgData[idx+1], b = imgData[idx+2], a = imgData[idx+3];
+                    
+                    // 如果抓到像素是黑色的 (代表是文字)
+                    if (a > 128 && (r+g+b)/3 < 128) {
+                        const byteIndex = py * widthBytes + Math.floor(px / 8);
+                        const bitIndex = 7 - (px % 8);
+                        // 就把這個位元「挖空變成 0」，機器就會在這裡噴出黑墨！
+                        bitmapData[byteIndex] &= ~(1 << bitIndex);
+                    }
+                }
+            }
+
+            // 4. 打包 TSPL 指令
+            const height_mm = Math.ceil(canvas.height / 8);
+            const headerStr = `SIZE 48 mm, ${height_mm} mm\r\nGAP 0 mm, 0 mm\r\nCLS\r\nBITMAP 0,0,${widthBytes},${canvas.height},0,`;
+            const header = new TextEncoder().encode(headerStr);
+            const footer = new TextEncoder().encode(`\r\nPRINT 1,1\r\nFEED 160\r\n`);
+
+            const finalBuffer = new Uint8Array(header.length + bitmapData.length + footer.length);
+            finalBuffer.set(header, 0);
+            finalBuffer.set(bitmapData, header.length);
+            finalBuffer.set(footer, header.length + bitmapData.length);
+
+            // 5. 送出列印
+            await sendDataToPrinter(finalBuffer);
+            upSt(row, '待製作');
+
+        } catch (e) {
+            alert("列印失敗：" + e.message);
+            console.error(e);
+        }
+    }
+</script>
+</body>
+</html>
