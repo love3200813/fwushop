@@ -44,12 +44,13 @@
         
         <label>付款方式：</label>
         <select id="payMethod" onchange="checkPaymentRules()">
+            <option value="LINEPAY">🟢 LINE Pay (測試預付)</option>
             <option value="信用卡">💳 信用卡 (線上預付)</option>
             <option value="現金">💵 現場付款 (到店結帳)</option>
         </select>
 
         <div id="phoneDiv">
-            <label style="color:var(--primary); margin-top:10px; display:block; font-weight:bold;">聯絡電話 (信用卡付款必填)：</label>
+            <label style="color:var(--primary); margin-top:10px; display:block; font-weight:bold;">聯絡電話 (線上付款必填)：</label>
             <input type="tel" id="customerPhone" placeholder="請輸入手機號碼 (如 0912345678)">
         </div>
 
@@ -114,6 +115,7 @@
     window.onload = () => { 
         renderMenu(); generateTimeOptions();
         const urlParams = new URLSearchParams(window.location.search);
+        // 原有邏輯：檢查是否有綠界的 MerchantTradeNo，若有則直接進入等待畫面
         if (urlParams.get('MerchantTradeNo')) startWaiting(urlParams.get('MerchantTradeNo'), urlParams.get('seq') || "查詢中...");
     };
 
@@ -126,11 +128,15 @@
 
     function checkPaymentRules() {
         const t = document.getElementById('pickupTime'), p = document.getElementById('payMethod');
-        if (t.value !== "現場取餐" && p.value === "現金") { alert("⚠️ 預約需使用線上刷卡！"); p.value = "信用卡"; }
+        
+        // 修正判斷邏輯：信用卡與 LINE Pay 都視為線上支付
+        const isOnlinePay = (p.value === "信用卡" || p.value === "LINEPAY");
+
+        if (t.value !== "現場取餐" && p.value === "現金") { alert("⚠️ 預約需使用線上支付！"); p.value = "LINEPAY"; }
         if (p.value === "現金" && t.value !== "現場取餐") { alert("⚠️ 現金僅限現場取餐！"); t.value = "現場取餐"; }
         
-        // 🛑 新增：根據付款方式顯示或隱藏電話輸入框
-        document.getElementById('phoneDiv').style.display = (p.value === "信用卡") ? "block" : "none";
+        // 🛑 根據付款方式顯示或隱藏電話輸入框
+        document.getElementById('phoneDiv').style.display = isOnlinePay ? "block" : "none";
     }
 
     function showPage(id) {
@@ -141,9 +147,9 @@
 
     function startGuestOrder() { 
         cart = {}; renderMenu(); document.getElementById('totalTxt').innerText = "0"; 
-        document.getElementById('pickupTime').value = "現場取餐"; document.getElementById('payMethod').value = "信用卡"; 
-        document.getElementById('customerPhone').value = ""; // 🛑 清空上次的電話紀錄
-        checkPaymentRules(); // 🛑 重置顯示狀態
+        document.getElementById('pickupTime').value = "現場取餐"; document.getElementById('payMethod').value = "LINEPAY"; 
+        document.getElementById('customerPhone').value = ""; 
+        checkPaymentRules(); 
         const btn = document.getElementById('submitBtn'); if(btn) { btn.disabled = false; btn.innerText = "確認點餐"; }
         showPage('orderPage'); 
     }
@@ -154,17 +160,17 @@
     async function submitOrder() {
         if(Object.keys(cart).length === 0) return alert("請選餐");
         
-        // 🛑 新增：檢查信用卡付款是否填寫電話
         const payMethod = document.getElementById('payMethod').value;
         const phone = document.getElementById('customerPhone').value.trim();
-        if (payMethod === "信用卡" && phone === "") {
+        
+        // 檢查線上付款是否填寫電話
+        if ((payMethod === "信用卡" || payMethod === "LINEPAY") && phone === "") {
             return alert("⚠️ 請填寫聯絡電話，以便餐點有問題時能及時通知您！");
         }
 
         const btn = document.getElementById('submitBtn'); const oriText = btn.innerText;
         btn.disabled = true; btn.innerText = "訂單送出中...";
         
-        // 🛑 修改：將 phone 打包送給後端
         const orderData = { 
             items: Object.keys(cart).map(k => `${k}x${cart[k]}`).join(','), 
             total: document.getElementById('totalTxt').innerText, 
@@ -175,13 +181,22 @@
         const frontendUrl = window.location.href.split('?')[0]; 
         const res = await apiCall("submitOrder", { orderData: orderData, frontendUrl: frontendUrl });
         
-        if (orderData.payMethod === "信用卡" && res && res.ecpayData && !res.error) {
+        // --- 核心整合判斷 ---
+
+        // A. LINE Pay 處理 (直接跳轉 URL)
+        if (res && res.linePayUrl) {
+            window.location.href = res.linePayUrl;
+        } 
+        // B. 信用卡處理 (綠界 Form Submit)
+        else if (orderData.payMethod === "信用卡" && res && res.ecpayData && !res.error) {
             const form = document.getElementById('ecpayForm'); 
             form.action = res.ecpayData.ServiceURL; 
             form.target = "_self";
             form.innerHTML = Object.keys(res.ecpayData).map(key => key!=="ServiceURL" ? `<input type="hidden" name="${key}" value="${res.ecpayData[key]}">` : '').join('');
             form.submit(); 
-        } else if (res && !res.error) { 
+        } 
+        // C. 現金或其它處理 (進入等待畫面)
+        else if (res && !res.error) { 
             startWaiting(res.orderId, res.seqId); 
         } else {
             alert("下單失敗：" + (res && res.error ? res.error : "網路連線異常"));
