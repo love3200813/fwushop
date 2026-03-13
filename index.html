@@ -59,7 +59,13 @@
     <h2 id="waitNotify" style="margin-bottom: 20px;">⏳ 連線資料庫中</h2>
     <button id="stopAudioBtn" class="btn-main" style="background:#e74c3c; display:none; margin-bottom: 20px;" onclick="stopAudioManual()">✅ 我已收到，關閉鈴聲</button>
     <div id="waitInfo" style="text-align:left; background:#2c3e50; padding:20px; border-radius:12px; font-size:18px;"></div>
-    <button class="btn-main" style="background:#666; margin-top:30px;" onclick="showPage('homePage')">結束並返回首頁</button>
+    
+    <div style="background: rgba(243, 156, 18, 0.15); border: 2px solid #f39c12; color: #fff; padding: 15px; border-radius: 8px; margin: 20px auto; text-align: center; font-weight: bold; line-height: 1.6;">
+        ⚠️ 溫馨提醒 ⚠️<br>
+        <span style="color: #f39c12; font-size: 1.1em;">請保留此網頁不要關閉，以利等候取餐通知！</span>
+    </div>
+
+    <button class="btn-main" style="background:#666; margin-top:10px;" onclick="confirmLeavePage()">結束並返回首頁</button>
 </div>
 
 <div id="queryPage" class="page">
@@ -176,6 +182,20 @@
     function stopAudioManual() { const a = document.getElementById('notifSound'); a.pause(); a.currentTime = 0; a.loop = false; document.getElementById('stopAudioBtn').style.display = "none"; if(audioTimeout) clearTimeout(audioTimeout); }
     function enableAudio() { document.getElementById('notifSound').play().then(() => { document.getElementById('notifSound').pause(); document.getElementById('clickHint').innerText = "✅ 語音提醒已準備就緒"; document.getElementById('clickHint').style.background = "#2ecc71"; }); }
     function queryOrder() { const id = document.getElementById('queryInput').value.trim(); if(id) startWaiting(id); else alert("請輸入單號"); }
+    
+    // 新增：攔截返回首頁的確認視窗邏輯
+    function confirmLeavePage() {
+        // 動態抓取畫面上大字體的單號
+        const currentSeq = document.getElementById('waitSeq').innerText;
+        
+        // 組裝要提醒客人的文字內容
+        const msg = "⚠️ 離開頁面提醒 ⚠️\n\n您的取餐單號是：【 " + currentSeq + " 】\n\n請務必記下或截圖您的單號！\n若不小心關閉網頁，需使用此單號重新查詢進度。\n\n您確定要結束並返回首頁嗎？";
+        
+        // 彈出確認視窗，如果按了「確定」，就執行原本的 showPage('homePage')
+        if (confirm(msg)) {
+            showPage('homePage');
+        }
+    }
 </script>
 </body>
 </html>
