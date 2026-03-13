@@ -149,10 +149,14 @@
         const res = await apiCall("submitOrder", { orderData: orderData, frontendUrl: frontendUrl });
         
         if (orderData.payMethod === "信用卡" && res && res.ecpayData && !res.error) {
-            const form = document.getElementById('ecpayForm'); form.action = res.ecpayData.ServiceURL; form.target = "_blank"; 
+            const form = document.getElementById('ecpayForm'); 
+            form.action = res.ecpayData.ServiceURL; 
+            form.target = "_self"; // 改為同視窗跳轉，避免 Safari 阻擋
             form.innerHTML = Object.keys(res.ecpayData).map(key => key!=="ServiceURL" ? `<input type="hidden" name="${key}" value="${res.ecpayData[key]}">` : '').join('');
-            form.submit(); startWaiting(res.orderId, res.seqId); 
-        } else if (res && !res.error) { startWaiting(res.orderId, res.seqId); 
+            form.submit(); 
+            // 移除 startWaiting，畫面將直接跳轉綠界
+        } else if (res && !res.error) { 
+            startWaiting(res.orderId, res.seqId); 
         } else {
             alert("下單失敗：" + (res && res.error ? res.error : "網路連線異常"));
             btn.disabled = false; btn.innerText = oriText;
@@ -183,15 +187,10 @@
     function enableAudio() { document.getElementById('notifSound').play().then(() => { document.getElementById('notifSound').pause(); document.getElementById('clickHint').innerText = "✅ 語音提醒已準備就緒"; document.getElementById('clickHint').style.background = "#2ecc71"; }); }
     function queryOrder() { const id = document.getElementById('queryInput').value.trim(); if(id) startWaiting(id); else alert("請輸入單號"); }
     
-    // 新增：攔截返回首頁的確認視窗邏輯
+    // 攔截返回首頁的確認視窗邏輯
     function confirmLeavePage() {
-        // 動態抓取畫面上大字體的單號
         const currentSeq = document.getElementById('waitSeq').innerText;
-        
-        // 組裝要提醒客人的文字內容
         const msg = "⚠️ 離開頁面提醒 ⚠️\n\n您的取餐單號是：【 " + currentSeq + " 】\n\n請務必記下或截圖您的單號！\n若不小心關閉網頁，需使用此單號重新查詢進度。\n\n您確定要結束並返回首頁嗎？";
-        
-        // 彈出確認視窗，如果按了「確定」，就執行原本的 showPage('homePage')
         if (confirm(msg)) {
             showPage('homePage');
         }
@@ -199,4 +198,3 @@
 </script>
 </body>
 </html>
-
