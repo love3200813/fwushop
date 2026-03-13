@@ -21,7 +21,6 @@
         .item-row { background: var(--card); padding: 12px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border-left: 5px solid var(--primary); }
         .btn-qty { width: 40px; height: 40px; border-radius: 50%; border: none; background: var(--primary); color: white; font-weight: bold; cursor: pointer; font-size: 18px; }
 
-        /* 🖥️ 電腦版響應式：菜單變雙排 */
         @media (min-width: 768px) {
             #orderPage.page { max-width: 800px; }
             #menu { grid-template-columns: 1fr 1fr; }
@@ -42,11 +41,18 @@
     <div style="background:#333; padding:15px; border-radius:10px; margin-top:15px">
         <label>取餐時間：</label>
         <select id="pickupTime" onchange="checkPaymentRules()"></select>
+        
         <label>付款方式：</label>
         <select id="payMethod" onchange="checkPaymentRules()">
             <option value="信用卡">💳 信用卡 (線上預付)</option>
             <option value="現金">💵 現場付款 (到店結帳)</option>
         </select>
+
+        <div id="phoneDiv">
+            <label style="color:var(--primary); margin-top:10px; display:block; font-weight:bold;">聯絡電話 (信用卡付款必填)：</label>
+            <input type="tel" id="customerPhone" placeholder="請輸入手機號碼 (如 0912345678)">
+        </div>
+
         <h2 style="text-align:right;">總計: $<span id="totalTxt">0</span></h2>
         <button id="submitBtn" class="btn-main" onclick="submitOrder()">確認點餐</button>
         <button class="btn-main" style="background:#666" onclick="showPage('homePage')">返回</button>
@@ -100,7 +106,7 @@
     async function apiCall(action, params = {}) {
         let url = new URL(GAS_API_URL);
         url.searchParams.append('action', action);
-        url.searchParams.append('t', new Date().getTime()); // 防快取
+        url.searchParams.append('t', new Date().getTime()); 
         for (let key in params) url.searchParams.append(key, typeof params[key] === 'object' ? JSON.stringify(params[key]) : params[key]);
         try { const response = await fetch(url); return await response.json(); } catch (e) { return null; }
     }
@@ -122,6 +128,9 @@
         const t = document.getElementById('pickupTime'), p = document.getElementById('payMethod');
         if (t.value !== "現場取餐" && p.value === "現金") { alert("⚠️ 預約需使用線上刷卡！"); p.value = "信用卡"; }
         if (p.value === "現金" && t.value !== "現場取餐") { alert("⚠️ 現金僅限現場取餐！"); t.value = "現場取餐"; }
+        
+        // 🛑 新增：根據付款方式顯示或隱藏電話輸入框
+        document.getElementById('phoneDiv').style.display = (p.value === "信用卡") ? "block" : "none";
     }
 
     function showPage(id) {
@@ -133,6 +142,8 @@
     function startGuestOrder() { 
         cart = {}; renderMenu(); document.getElementById('totalTxt').innerText = "0"; 
         document.getElementById('pickupTime').value = "現場取餐"; document.getElementById('payMethod').value = "信用卡"; 
+        document.getElementById('customerPhone').value = ""; // 🛑 清空上次的電話紀錄
+        checkPaymentRules(); // 🛑 重置顯示狀態
         const btn = document.getElementById('submitBtn'); if(btn) { btn.disabled = false; btn.innerText = "確認點餐"; }
         showPage('orderPage'); 
     }
@@ -142,19 +153,34 @@
 
     async function submitOrder() {
         if(Object.keys(cart).length === 0) return alert("請選餐");
+        
+        // 🛑 新增：檢查信用卡付款是否填寫電話
+        const payMethod = document.getElementById('payMethod').value;
+        const phone = document.getElementById('customerPhone').value.trim();
+        if (payMethod === "信用卡" && phone === "") {
+            return alert("⚠️ 請填寫聯絡電話，以便餐點有問題時能及時通知您！");
+        }
+
         const btn = document.getElementById('submitBtn'); const oriText = btn.innerText;
         btn.disabled = true; btn.innerText = "訂單送出中...";
-        const orderData = { items: Object.keys(cart).map(k => `${k}x${cart[k]}`).join(','), total: document.getElementById('totalTxt').innerText, pickupTime: document.getElementById('pickupTime').value, payMethod: document.getElementById('payMethod').value };
+        
+        // 🛑 修改：將 phone 打包送給後端
+        const orderData = { 
+            items: Object.keys(cart).map(k => `${k}x${cart[k]}`).join(','), 
+            total: document.getElementById('totalTxt').innerText, 
+            pickupTime: document.getElementById('pickupTime').value, 
+            payMethod: payMethod,
+            phone: phone 
+        };
         const frontendUrl = window.location.href.split('?')[0]; 
         const res = await apiCall("submitOrder", { orderData: orderData, frontendUrl: frontendUrl });
         
         if (orderData.payMethod === "信用卡" && res && res.ecpayData && !res.error) {
             const form = document.getElementById('ecpayForm'); 
             form.action = res.ecpayData.ServiceURL; 
-            form.target = "_self"; // 改為同視窗跳轉，避免 Safari 阻擋
+            form.target = "_self";
             form.innerHTML = Object.keys(res.ecpayData).map(key => key!=="ServiceURL" ? `<input type="hidden" name="${key}" value="${res.ecpayData[key]}">` : '').join('');
             form.submit(); 
-            // 移除 startWaiting，畫面將直接跳轉綠界
         } else if (res && !res.error) { 
             startWaiting(res.orderId, res.seqId); 
         } else {
@@ -187,7 +213,6 @@
     function enableAudio() { document.getElementById('notifSound').play().then(() => { document.getElementById('notifSound').pause(); document.getElementById('clickHint').innerText = "✅ 語音提醒已準備就緒"; document.getElementById('clickHint').style.background = "#2ecc71"; }); }
     function queryOrder() { const id = document.getElementById('queryInput').value.trim(); if(id) startWaiting(id); else alert("請輸入單號"); }
     
-    // 攔截返回首頁的確認視窗邏輯
     function confirmLeavePage() {
         const currentSeq = document.getElementById('waitSeq').innerText;
         const msg = "⚠️ 離開頁面提醒 ⚠️\n\n您的取餐單號是：【 " + currentSeq + " 】\n\n請務必記下或截圖您的單號！\n若不小心關閉網頁，需使用此單號重新查詢進度。\n\n您確定要結束並返回首頁嗎？";
